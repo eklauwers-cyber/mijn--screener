@@ -30,8 +30,7 @@ CATEGORIES = {
         "FAGR.ST", "ELUXB.ST", "NK.PA", "URW.AS"
     ]
 }
-    ]
-}
+
 
 selected_category = st.selectbox("Kies een aandelenlijst om te scannen:", list(CATEGORIES.keys()))
 tickers = CATEGORIES[selected_category]
