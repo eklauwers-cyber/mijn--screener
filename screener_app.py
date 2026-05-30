@@ -3,58 +3,53 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="Global Micro-Cap & Hidden Gems Screener", layout="wide")
-st.title("🔍 Hidden Gems & Small-Cap Value Screener")
-st.write("Dit dashboard scant de minder bekende en micro-cap aandelen op zoek naar extreme upside en veilige balansen.")
+st.title("🔍 Advanced Hidden Gems & Stock Screener")
+st.write("Dit dashboard scant aandelen op potentie, risico (Altman Z) en toont nu ook Europese markten en koersgrafieken.")
 
-# We breiden de categorieën uit met indices voor kleinere/onbekende bedrijven
+# 1. UITBREIDING: Meer landen (Nederland & België toegevoegd)
 CATEGORIES = {
-    "💎 Onbekende Amerikaanse Small-Caps (S&P 600 selectie)": [
+    "🇳🇱🇧🇪 Nederlandse & Belgische Topaandelen": [
+        "ASML.AS", "INGA.AS", "ASRN.AS", "ADYEN.AS", "HEIA.AS", "UNA.AS", "AALB.AS", "RAND.AS",
+        "UCB.BR", "KBC.BR", "SOLB.BR", "EVS.BR", "RECT.BR", "ACKB.BR", "SOF.BR"
+    ],
+    "💎 Onbekende Amerikaanse Small-Caps (S&P 600)": [
         "AAL", "AAON", "CHEF", "EBF", "ENS", "FIZZ", "HELE", "HI", "KFRC", "LANC",
-        "LECO", "MGEE", "MMS", "MOV", "MYRG", "NEOG", "OII", "OSIS", "PLPC", "POWI",
-        "RBC", "RGR", "SFBS", "SHEN", "SMP", "SPXC", "TREX", "UFPI", "VMI", "WMS"
+        "LECO", "MGEE", "MMS", "MOV", "MYRG", "NEOG", "OII", "OSIS", "PLPC", "POWI"
     ],
-    "🌍 Europese 'Hidden Gems' (Minder bekende mid/small caps)": [
+    "🌍 Europese 'Hidden Gems'": [
         "CNH", "FLS", "HAON.DE", "BOSS.DE", "PUM.DE", "JUVE.MI", "TOM2.AS", "POST.AS",
-        "FAGR.ST", "ELUXB.ST", "NK.PA", "URW.AS", "SOLB.BR", "EVS.BR", "RECT.BR"
-    ],
-    "🚀 Micro-Caps & Turnaround Kandidaten (Hoog Risico)": [
-        "AOUT", "BCOV", "ELYM", "GENC", "JAKK", "LCUT", "MIND", "PRTS", "RELL", "SOHO",
-        "TAST", "UEC", "VHC", "VUZI", "XPER"
+        "FAGR.ST", "ELUXB.ST", "NK.PA", "URW.AS"
     ]
 }
 
-selected_category = st.selectbox("Kies een Small-Cap lijst om te scannen:", list(CATEGORIES.keys()))
+selected_category = st.selectbox("Kies een aandelenlijst om te scannen:", list(CATEGORIES.keys()))
 tickers = CATEGORIES[selected_category]
 
-st.write(f"Aantal onbekende aandelen in deze selectie: **{len(tickers)}**")
+st.write(f"Aantal aandelen in deze selectie: **{len(tickers)}**")
 
-# Belangrijk: Small-caps zijn volatieler, dus we zetten de filters scherper!
-min_upside = st.slider("Minimaal gewenste Upside (%)", min_value=0, max_value=200, value=25)
+min_upside = st.slider("Minimaal gewenste Upside (%)", min_value=-20, max_value=200, value=15)
 only_safe = st.checkbox("Toon ALLEEN aandelen in de 🟢 Safe Zone (Altman Z > 2.99)", value=False)
 
-if st.button("Start Hidden Gem Scan"):
+if st.button("Start Geavanceerde Scan"):
     results = []
     
     progress_bar = st.progress(0)
     status_text = st.empty()
     
     for i, ticker_symbol in enumerate(tickers):
-        status_text.text(f"Analyseren van small-cap {i+1}/{len(tickers)}: {ticker_symbol}...")
+        status_text.text(f"Analyseren van {i+1}/{len(tickers)}: {ticker_symbol}...")
         progress_bar.progress((i + 1) / len(tickers))
         
         try:
             stock = yf.Ticker(ticker_symbol)
             info = stock.info
             
-            # Snelkoppeling: als er geen analistendoel is, slaan we hem direct over
             target = info.get("targetMeanPrice")
             current = info.get("currentPrice") or info.get("regularMarketPrice", 1)
-            if not target or target <= current:
+            if not target:
                 continue
                 
             upside = ((target - current) / current) * 100
-            
-            # Filter direct op upside
             if upside < min_upside:
                 continue
                 
@@ -69,7 +64,14 @@ if st.button("Start Hidden Gem Scan"):
             name = info.get("longName", ticker_symbol)
             sector = info.get("sector", "Onbekend")
             
-            # Altman Z-Score berekening
+            # 2. UITBREIDING: Extra financiële data ophalen
+            pe_ratio = info.get("trailingPE")
+            pe_str = f"{pe_ratio:.1f}" if pe_ratio else "N/A"
+            
+            dividend = info.get("dividendYield")
+            div_str = f"{dividend * 100:.1f}%" if dividend else "0.0%"
+            
+            # Altman Z-Score
             total_assets = latest_bs.get('Total Assets', 1)
             working_capital = latest_bs.get('Current Assets', 0) - latest_bs.get('Current Liabilities', 0)
             retained_earnings = latest_bs.get('Retained Earnings', 0)
@@ -93,9 +95,8 @@ if st.button("Start Hidden Gem Scan"):
             elif 1.81 <= z_score <= 2.99:
                 status = "🟡 Grey Zone"
             else:
-                status = "🔴 Value Trap Gevaar!"
+                status = "🔴 Value Trap!"
             
-            # Filter voor de 'Alleen Veilige Aandelen' checkbox
             if only_safe and z_score <= 2.99:
                 continue
                 
@@ -103,9 +104,11 @@ if st.button("Start Hidden Gem Scan"):
                 "Ticker": ticker_symbol,
                 "Naam": name,
                 "Sector": sector,
-                "Huidige Koers": f"${current:.2f}",
-                "Koersdoel": f"${target:.2f}",
+                "Huidige Koers": f"${current:.2f}" if not ticker_symbol.endswith(('.AS', '.BR', '.DE')) else f"€{current:.2f}",
+                "Koersdoel": f"${target:.2f}" if not ticker_symbol.endswith(('.AS', '.BR', '.DE')) else f"€{target:.2f}",
                 "Upside Potentieel": f"{upside:.1f}%",
+                "K/W Verhouding (P/E)": pe_str,
+                "Dividend Rendement": div_str,
                 "Altman Z-Score": f"{z_score:.2f}",
                 "Risiko Status": status
             })
@@ -116,9 +119,27 @@ if st.button("Start Hidden Gem Scan"):
     
     if results:
         df = pd.DataFrame(results)
-        # Sorteer op de allerhoogste upside
         df['sort_col'] = df['Upside Potentieel'].str.rstrip('%').astype(float)
         df = df.sort_values(by="sort_col", ascending=False).drop(columns=['sort_col'])
         st.dataframe(df, use_container_width=True)
     else:
-        st.warning("Geen onbekende pareltjes gevonden die aan de strenge criteria voldoen. Verlaag eventueel de minimale Upside.")
+        st.warning("Geen aandelen gevonden die aan de criteria voldoen.")
+
+# 3. UITBREIDING: Interactieve Grafieksectie onderaan
+st.markdown("---")
+st.subheader("📈 Bekijk Historische Koersgrafiek (1 Jaar)")
+graph_ticker = st.selectbox("Selecteer een ticker voor de grafiek:", tickers)
+
+if graph_ticker:
+    try:
+        stock_data = yf.Ticker(graph_ticker)
+        # Haal de geschiedenis van 1 jaar op
+        hist = stock_data.history(period="1y")
+        if not hist.empty:
+            # Toon een mooie interactieve lijnkaart van de sluitingskoersen
+            st.line_chart(hist['Close'])
+            st.write(f"Bovenstaande grafiek toont het koersverloop van **{graph_ticker}** over de afgelopen 12 maanden.")
+        else:
+            st.info("Geen historische koersdata beschikbaar voor deze ticker.")
+    except Exception as e:
+        st.error(f"Kon grafiek niet laden: {e}")
