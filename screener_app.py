@@ -8,9 +8,18 @@ st.write("Dit dashboard scant aandelen op potentie, risico (Altman Z) en toont n
 
 # 1. UITBREIDING: Meer landen (Nederland & België toegevoegd)
 CATEGORIES = {
+    CATEGORIES = {
     "🇳🇱🇧🇪 Nederlandse & Belgische Topaandelen": [
         "ASML.AS", "INGA.AS", "ASRN.AS", "ADYEN.AS", "HEIA.AS", "UNA.AS", "AALB.AS", "RAND.AS",
-        "UCB.BR", "KBC.BR", "SOLB.BR", "EVS.BR", "RECT.BR", "ACKB.BR", "SOF.BR"
+        "UCB.BR", "KBC.BR", "SOLB.BR", "EVS.BR", "RECT.BR", "ACKB.BR", "SOF.BR", "UMIB.BR"
+    ],
+    "👑 Dividend Aristocrats (Veilig & Stabiel)": [
+        "KO", "PEP", "PG", "JNJ", "MMM", "XOM", "CVX", "LOW", "TGT", "WMT", 
+        "ABBV", "MO", "PM", "BEN", "GPC", "NUE", "SPGI", "GWW"
+    ],
+    "🇪🇺 Europese Groei- & Techparels": [
+        "SAP.DE", "IFX.DE", "STMPA.PA", "RMS.PA", "MC.PA", "OR.PA", "EVO.ST", 
+        "DSV.CO", "NOVO-B.CO", "ADEN.SW", "LONN.SW"
     ],
     "💎 Onbekende Amerikaanse Small-Caps (S&P 600)": [
         "AAL", "AAON", "CHEF", "EBF", "ENS", "FIZZ", "HELE", "HI", "KFRC", "LANC",
@@ -19,6 +28,8 @@ CATEGORIES = {
     "🌍 Europese 'Hidden Gems'": [
         "CNH", "FLS", "HAON.DE", "BOSS.DE", "PUM.DE", "JUVE.MI", "TOM2.AS", "POST.AS",
         "FAGR.ST", "ELUXB.ST", "NK.PA", "URW.AS"
+    ]
+}
     ]
 }
 
