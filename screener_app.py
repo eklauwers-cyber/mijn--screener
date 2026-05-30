@@ -8,7 +8,7 @@ st.write("Dit dashboard scant aandelen op potentie, risico (Altman Z) en toont n
 
 # 1. UITBREIDING: Meer landen (Nederland & België toegevoegd)
 CATEGORIES = {
-    CATEGORIES = {
+    
     "🇳🇱🇧🇪 Nederlandse & Belgische Topaandelen": [
         "ASML.AS", "INGA.AS", "ASRN.AS", "ADYEN.AS", "HEIA.AS", "UNA.AS", "AALB.AS", "RAND.AS",
         "UCB.BR", "KBC.BR", "SOLB.BR", "EVS.BR", "RECT.BR", "ACKB.BR", "SOF.BR", "UMIB.BR"
