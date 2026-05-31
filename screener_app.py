@@ -3,15 +3,15 @@ import pandas as pd
 import streamlit as st
 import requests
 
-st.set_page_config(page_title="Global Value Screener & Watchlist", layout="wide")
+st.set_page_config(page_title="Ultimate Global Value & Quality Screener", layout="wide")
 
 # --- INITIALISEER WATCHLIST IN HET GEHEUGEN ---
 if 'watchlist' not in st.session_state:
     st.session_state['watchlist'] = []
 
-st.title("🌐 Ultimate Global Stock Screener & Watchlist")
+st.title("🌐 Ultimate Global Value & Quality Screener")
 
-# We maken twee tabbladen: één om te scannen en één voor jouw persoonlijke volglijst
+# Twee tabbladen voor overzicht op mobiel
 tab1, tab2 = st.tabs(["🚀 Markt Scanner", "⭐ Mijn Persoonlijke Watchlist"])
 
 # --- STAP 1: LIVE DATABASE INLADEN ---
@@ -42,7 +42,7 @@ def get_all_global_tickers():
 
 global_database = get_all_global_tickers()
 
-# --- FUNCTIONALITEIT VOOR HET OPHALEN VAN BEURSDATA ---
+# --- FUNCTIONALITEIT VOOR HET OPHALEN EN BEREKENEN VAN DIEPGAANDE BEURSDATA ---
 def scan_ticker_data(ticker_symbol):
     try:
         stock = yf.Ticker(ticker_symbol)
@@ -61,15 +61,76 @@ def scan_ticker_data(ticker_symbol):
         latest_bs = bs.iloc[:, 0]
         latest_fin = fin.iloc[:, 0]
         
+        # --- VERZAMELEN VAN JOUW GEWENSTE CRITERIA ---
         market_cap = info.get("marketCap")
         enterprise_value = info.get("enterpriseValue")
+        
+        pe_ratio = info.get("trailingPE")
+        pe_str = f"{pe_ratio:.1f}" if pe_ratio else "N/A"
+        
+        pb_ratio = info.get("priceToBook")
+        pb_str = f"{pb_ratio:.2f}" if pb_ratio else "N/A"
+        
         ev_ebitda = info.get("enterpriseToEbitda")
+        
+        # Forward EV/EBITDA stabiel berekenen of ophalen
+        fwd_ev_ebitda = info.get("forwardEbitda")
+        if not fwd_ev_ebitda or not isinstance(fwd_ev_ebitda, (int, float)):
+            fwd_eps = info.get("forwardEps")
+            shares = info.get("sharesOutstanding")
+            if fwd_eps and shares and enterprise_value:
+                estimated_fwd_earnings = fwd_eps * shares
+                fwd_ev_ebitda = enterprise_value / (estimated_fwd_earnings * 1.2) # Schatting EBITDA
+            else:
+                fwd_ev_ebitda = None
         
         free_cash_flow = info.get("freeCashflow") or (cf.iloc[0].get('Free Cash Flow') if not cf.empty else None)
         ev_fcf = enterprise_value / free_cash_flow if enterprise_value and free_cash_flow and free_cash_flow > 0 else None
             
         roe = info.get("returnOnEquity")
-        roic = (latest_fin.get('EBIT', 0) * 0.75) / (info.get('totalDebt', 0) + latest_bs.get('Stockholders Equity', 1) - info.get('totalCash', 0)) if latest_fin.get('EBIT') else None
+        
+        # ROE 5-jaar en 10-jaar gemiddelde berekenen uit de historie
+        roe_5y_avg = "N/A"
+        roe_10y_avg = "N/A"
+        
+        if 'Net Income' in fin.index:
+            historical_roes = []
+            for col in range(min(len(bs.columns), len(fin.columns))):
+                net_inc = fin.iloc[:, col].get('Net Income', 0)
+                equity = bs.iloc[:, col].get('Stockholders Equity') or bs.iloc[:, col].get('Total Stockholders Equity', 1)
+                if equity and equity > 0:
+                    historical_roes.append(net_inc / equity)
+            
+            if len(historical_roes) > 0:
+                roe_5y_avg = sum(historical_roes[:5]) / min(len(historical_roes), 5)
+                roe_5y_str = f"{roe_5y_avg * 100:.1f}%"
+            else:
+                roe_5y_str = "N/A"
+                
+            if len(historical_roes) >= 3:
+                roe_10y_avg = sum(historical_roes[:10]) / min(len(historical_roes), 10)
+                roe_10y_str = f"{roe_10y_avg * 100:.1f}%"
+            else:
+                roe_10y_str = "N/A"
+        else:
+            roe_5y_str = "N/A"
+            roe_10y_str = "N/A"
+
+        # ROIC Berekening
+        ebit = latest_fin.get('EBIT') or latest_fin.get('Operating Income', 0)
+        total_debt = info.get('totalDebt') or (latest_bs.get('Total Debt') or 0)
+        total_equity = latest_bs.get('Stockholders Equity') or latest_bs.get('Total Stockholders Equity', 1)
+        cash = info.get('totalCash') or (latest_bs.get('Cash And Cash Equivalents') or 0)
+        invested_capital = total_debt + total_equity - cash
+        roic = (ebit * 0.75) / invested_capital if invested_capital > 0 and ebit else None
+
+        # Valuta formatteer hulp
+        def format_big_number(num, valuta_sign):
+            if not num: return "N/A"
+            if num >= 1e12: return f"{valuta_sign}{num/1e12:.2f}T"
+            if num >= 1e9: return f"{valuta_sign}{num/1e9:.2f}B"
+            if num >= 1e6: return f"{valuta_sign}{num/1e6:.2f}M"
+            return f"{valuta_sign}{num:.2f}"
 
         if ticker_symbol.endswith(('.AS', '.BR', '.DE', '.PA')): valuta = "€"
         elif ticker_symbol.endswith('.L'): valuta = "£"
@@ -78,14 +139,20 @@ def scan_ticker_data(ticker_symbol):
         return {
             "Ticker": ticker_symbol,
             "Naam": info.get("longName", ticker_symbol),
+            "Market Cap": format_big_number(market_cap, valuta),
+            "Enterprise Value (EV)": format_big_number(enterprise_value, valuta),
             "Huidige Koers": f"{valuta}{current:.2f}",
-            "Koersdoel": f"{valuta}{target:.2f}" if target else "N/A",
             "Upside": f"{upside:.1f}%" if target else "N/A",
+            "P/E (K/W)": pe_str,
+            "P/B Ratio": pb_str,
             "EV/EBITDA": f"{ev_ebitda:.1f}" if ev_ebitda else "N/A",
+            "Forward EV/EBITDA": f"{fwd_ev_ebitda:.1f}" if fwd_ev_ebitda and fwd_ev_ebitda > 0 else "N/A",
             "EV/FCF": f"{ev_fcf:.1f}" if ev_fcf else "N/A",
             "ROE (Huidig)": f"{roe * 100:.1f}%" if roe else "N/A",
+            "ROE 5Y Avg": roe_5y_str,
+            "ROE 10Y Avg": roe_10y_str,
             "ROIC": f"{roic * 100:.1f}%" if roic and roic > 0 else "N/A",
-            "raw_upside": upside # Dit verborgen getal gebruiken we puur om mee te sorteren en filteren
+            "raw_upside": upside
         }
     except:
         return None
@@ -101,8 +168,6 @@ with tab1:
         selected_continent = st.selectbox("Kies een continent:", list(global_database.keys()))
         full_ticker_list = global_database[selected_continent]
         max_to_scan = st.number_input("Hoeveel aandelen wil je scannen?", min_value=5, max_value=50, value=15)
-        
-        # HIER ZAT HET PROBLEEM: De slider staat nu weer netjes op zijn plek
         min_upside = st.slider("Minimaal gewenste Upside (%)", min_value=-20, max_value=200, value=15)
     
     tickers_to_scan = full_ticker_list[:max_to_scan]
@@ -115,13 +180,11 @@ with tab1:
             progress_bar.progress((i + 1) / len(tickers_to_scan))
             data = scan_ticker_data(ticker_symbol)
             if data:
-                # Filter toepassen van de slider:
                 if data['raw_upside'] >= min_upside:
                     results.append(data)
                 
         if results:
             df = pd.DataFrame(results)
-            # Sorteer netjes op de verborgen 'raw_upside' waarde zodat de hoogste bovenaan staan
             df = df.sort_values(by="raw_upside", ascending=False).drop(columns=['raw_upside'])
             st.dataframe(df, use_container_width=True)
             st.session_state['last_scan_results'] = df
@@ -150,7 +213,6 @@ with tab1:
 # ==========================================
 with tab2:
     st.header("⭐ Jouw Geselecteerde Aandelen")
-    st.write("De app volgt deze aandelen volledig automatisch en haalt bij elke opening de nieuwste live data op.")
     
     if not st.session_state['watchlist']:
         st.info("Je watchlist is nog leeg. Ga naar het tabblad 'Markt Scanner' om aandelen toe te voegen!")
