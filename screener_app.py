@@ -23,7 +23,7 @@ def get_all_global_tickers():
         ]
         eu_tickers = []
         for base in eu_bases:
-            eu_tickers.extend([f"{base}.AS", f"{base}.BR", f"{base}.DE", f"{base".PA", f"{base}.L"])
+            eu_tickers.extend([f"{base}.AS", f"{base}.BR", f"{base}.DE", f"{base}".PA", f"{base}.L"])
             
         asia_tickers = ["TSM", "SONY", "TM", "HMC", "BABA", "JD", "NTDOY", "6758.T", "7203.T"]
         latam_tickers = ["VALE", "PBR", "MELI", "AMX", "SQM"]
