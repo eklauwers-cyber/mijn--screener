@@ -4,6 +4,7 @@ import streamlit as st
 import requests
 import json
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 st.set_page_config(page_title="Global Value Screener & Portfolio Simulator", layout="wide")
@@ -12,7 +13,6 @@ st.set_page_config(page_title="Global Value Screener & Portfolio Simulator", lay
 DATA_FILE = "user_data.json"
 
 def load_user_data():
-    """Laadt de opgeslagen watchlist en portefeuille in bij het openen van de app."""
     if os.path.exists(DATA_FILE):
         try:
             with open(DATA_FILE, "r") as f:
@@ -26,7 +26,6 @@ def load_user_data():
     }
 
 def save_user_data():
-    """Slaat alle wijzigingen permanent op in de database."""
     data = {
         "watchlist": st.session_state['watchlist'],
         "portfolio_cash": st.session_state['portfolio_cash'],
@@ -53,7 +52,6 @@ def get_all_global_tickers():
         us_url = "https://raw.githubusercontent.com/rreichel3/US-Stock-Symbols/main/all/all_tickers.txt"
         us_tickers = requests.get(us_url).text.splitlines()
         
-        # Uitgebreidere lijst van Europese topaandelen
         eu_bases = [
             "AALB", "ABI", "ACKB", "ADYEN", "AGN", "AIR", "ALV", "AMG", "ASML", "ASRNL", "BESI", "BNP", "BP", "BSGR",
             "COLR", "CPR", "DSM", "DTE", "ENEL", "EXOR", "FLOW", "GSK", "HEIA", "INGA", "KBC", "LIGHT", "MC", "NN",
@@ -76,6 +74,8 @@ global_database = get_all_global_tickers()
 # --- BEURSDATA OPHALEN & ANALYSEREN ---
 def scan_ticker_data(ticker_symbol):
     try:
+        # Korte time.sleep om Yahoo Rate Limits te voorkomen
+        time.sleep(0.05)
         stock = yf.Ticker(ticker_symbol)
         info = stock.info
         current = info.get("currentPrice") or info.get("regularMarketPrice")
@@ -120,7 +120,7 @@ def scan_ticker_data(ticker_symbol):
             "raw_upside": upside,
             "raw_advies": advies
         }
-    except:
+    except Exception:
         return None
 
 # ==========================================
@@ -129,52 +129,46 @@ def scan_ticker_data(ticker_symbol):
 with tab1:
     st.header("🔍 Slimme Markt Scanner")
     
-    col_cont, col_alpha = st.columns(2)
+    col_cont, col_alpha, col_max = st.columns(3)
     
     with col_cont:
         selected_continent = st.selectbox("1. Kies een continent:", list(global_database.keys()))
     
-    # Definieer de alphabetische reeksen
-    letter_ranges = {
-        "Alle Aandelen (Alles)": [],
-        "A t/m C": ["A", "B", "C"],
-        "D t/m F": ["D", "E", "F"],
-        "G t/m I": ["G", "H", "I"],
-        "J t/m L": ["J", "K", "L"],
-        "M t/m O": ["M", "N", "O"],
-        "P t/m R": ["P", "Q", "R"],
-        "S t/m U": ["S", "T", "U"],
-        "V t/m Z": ["V", "W", "X", "Y", "Z"]
-    }
+    # Maak fijnmazigere letterkeuzes per enkele/dubbele letter om blokkades te vermijden
+    alphabet_options = ["Alle Letters", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"]
     
     with col_alpha:
-        selected_range = st.selectbox("2. Kies een Alphabethische Groep:", list(letter_ranges.keys()))
+        selected_letter = st.selectbox("2. Kies een Beginletter:", alphabet_options)
         
-    # Filter de tickers op basis van de geselecteerde lettergroep
+    with col_max:
+        max_scan_count = st.slider("3. Max. aantal te scannen aandelen:", min_value=10, max_value=300, value=50, step=10)
+        
     all_tickers_in_cont = global_database[selected_continent]
-    if selected_range != "Alle Aandelen (Alles)":
-        target_letters = tuple(letter_ranges[selected_range])
-        filtered_tickers = [t for t in all_tickers_in_cont if t.startswith(target_letters)]
+    
+    if selected_letter != "Alle Letters":
+        filtered_tickers = [t for t in all_tickers_in_cont if t.startswith(selected_letter)]
     else:
         filtered_tickers = all_tickers_in_cont
 
-    st.info(f"📍 Er zijn **{len(filtered_tickers)}** aandelen gevonden in de categorie **'{selected_range}'** voor {selected_continent}.")
+    st.info(f"📍 Er zijn **{len(filtered_tickers)}** aandelen met beginletter **'{selected_letter}'**. (Er worden er maximaal **{min(max_scan_count, len(filtered_tickers))}** gescand om blokkades te voorkomen).")
     
     only_show_best = st.checkbox("🎯 Toon ALLEEN de '🔥 TOP KOOPKANDIDATEN'", value=False)
     
-    if st.button("🚀 Scan Alle Aandelen in deze Categorie"):
-        if len(filtered_tickers) == 0:
-            st.warning("Geen aandelen gevonden in deze lettergroep.")
+    if st.button("🚀 Scan Selectie"):
+        tickers_to_scan = filtered_tickers[:max_scan_count]
+        
+        if len(tickers_to_scan) == 0:
+            st.warning("Geen aandelen gevonden voor deze filter.")
         else:
             results = []
             progress_bar = st.progress(0)
             
-            # Scannen via snelle parallelle verwerking
-            with ThreadPoolExecutor(max_workers=10) as executor:
-                futures = [executor.submit(scan_ticker_data, t) for t in filtered_tickers]
+            # Verlaagd naar max_workers=3 om Rate Limit te vermijden
+            with ThreadPoolExecutor(max_workers=3) as executor:
+                futures = [executor.submit(scan_ticker_data, t) for t in tickers_to_scan]
                 for i, future in enumerate(futures):
                     data = future.result()
-                    progress_bar.progress((i + 1) / len(filtered_tickers))
+                    progress_bar.progress((i + 1) / len(tickers_to_scan))
                     if data:
                         if only_show_best and data['raw_advies'] != "🔥 TOP KOOPKANDIDAAT": continue
                         results.append(data)
@@ -184,23 +178,27 @@ with tab1:
                 st.session_state['last_scan_results'] = df
                 st.dataframe(df.drop(columns=['raw_upside', 'raw_advies', 'Huidige Koers Raw']), use_container_width=True)
             else:
-                st.warning("Geen resultaten gevonden voor deze criteria.")
+                st.warning("Geen resultaten gevonden voor deze criteria (of Yahoo blokkeert tijdelijk verzoeken). Probeer het over een minuutje weer.")
 
     st.markdown("---")
     st.subheader("🛒 Virtueel Beleggen met je € 20.000 Budget")
     
-    suggestions = st.session_state['last_scan_results']['Ticker'].tolist() if 'last_scan_results' in st.session_state else ["AAPL", "ASML.AS"]
-    selected_buy_ticker = st.selectbox("Kies een aandeel om te kopen voor je simulatie-portefeuille:", suggestions)
-    buy_amount = st.number_input("Hoeveel euro wil je in dit aandeel steken?", min_value=100.0, max_value=20000.0, value=2000.0, step=500.0)
+    has_results = 'last_scan_results' in st.session_state and not st.session_state['last_scan_results'].empty
     
-    if st.button("💰 Koop Aandeel voor Portefeuille"):
-        if buy_amount > st.session_state['portfolio_cash']:
-            st.error("Je hebt niet genoeg virtueel cashgeld meer over!")
-        else:
-            stock_info = yf.Ticker(selected_buy_ticker).info
-            price = stock_info.get("currentPrice") or stock_info.get("regularMarketPrice")
-            
-            if price:
+    if has_results:
+        suggestions = st.session_state['last_scan_results']['Ticker'].tolist()
+        selected_buy_ticker = st.selectbox("Kies een aandeel om te kopen uit je scanningsresultaten:", suggestions)
+        buy_amount = st.number_input("Hoeveel euro wil je in dit aandeel steken?", min_value=100.0, max_value=20000.0, value=2000.0, step=500.0)
+        
+        if st.button("💰 Koop Aandeel voor Portefeuille"):
+            if buy_amount > st.session_state['portfolio_cash']:
+                st.error("Je hebt niet genoeg virtueel cashgeld meer over!")
+            else:
+                # Gebruik de reeds opgehaalde koers uit de tabel in plaats van een nieuwe verzoek naar Yahoo
+                scan_df = st.session_state['last_scan_results']
+                selected_row = scan_df[scan_df['Ticker'] == selected_buy_ticker].iloc[0]
+                price = selected_row['Huidige Koers Raw']
+                
                 shares_bought = buy_amount / price
                 st.session_state['portfolio_cash'] -= buy_amount
                 
@@ -214,7 +212,9 @@ with tab1:
                         'totaal_belegd': buy_amount
                     }
                 save_user_data()
-                st.success(f"Gefeliciteerd! Je hebt virtueel **{shares_bought:.2f} aandelen {selected_buy_ticker}** gekocht en opgeslagen!")
+                st.success(f"Gefeliciteerd! Je hebt virtueel **{shares_bought:.2f} aandelen {selected_buy_ticker}** gekocht!")
+    else:
+        st.info("Voer eerst een scan uit hierboven om aandelen te kunnen kopen.")
 
 # ==========================================
 # TAB 2: WATCHLIST
@@ -223,13 +223,16 @@ with tab2:
     st.header("⭐ Watchlist")
     st.write("Aandelen in je watchlist blijven hier permanent bewaard.")
     
-    suggestions = st.session_state['last_scan_results']['Ticker'].tolist() if 'last_scan_results' in st.session_state else ["AAPL", "MSFT", "ASML.AS"]
-    ticker_to_wl = st.selectbox("Kies aandeel voor watchlist:", suggestions)
-    if st.button("➕ Voeg toe aan Watchlist"):
-        if ticker_to_wl not in st.session_state['watchlist']:
-            st.session_state['watchlist'].append(ticker_to_wl)
-            save_user_data()
-            st.success(f"{ticker_to_wl} opgeslagen in je watchlist!")
+    if 'last_scan_results' in st.session_state and not st.session_state['last_scan_results'].empty:
+        suggestions = st.session_state['last_scan_results']['Ticker'].tolist()
+        ticker_to_wl = st.selectbox("Kies aandeel uit de scan voor je watchlist:", suggestions)
+        if st.button("➕ Voeg toe aan Watchlist"):
+            if ticker_to_wl not in st.session_state['watchlist']:
+                st.session_state['watchlist'].append(ticker_to_wl)
+                save_user_data()
+                st.success(f"{ticker_to_wl} opgeslagen in je watchlist!")
+    else:
+        st.info("Voer eerst een scan uit op het eerste tabblad om aandelen aan de watchlist toe te voegen.")
             
     st.write("Mijn gevolgde aandelen:", st.session_state['watchlist'])
 
@@ -243,7 +246,11 @@ with tab3:
     portfolio_rows = []
     
     for ticker, pos in st.session_state['portfolio_shares'].items():
-        live_price = yf.Ticker(ticker).info.get("currentPrice", pos['gem_aankoopkoers'])
+        try:
+            live_price = yf.Ticker(ticker).info.get("currentPrice", pos['gem_aankoopkoers'])
+        except Exception:
+            live_price = pos['gem_aankoopkoers']
+            
         live_val = pos['aantal'] * live_price
         winst_verlies = live_val - pos['totaal_belegd']
         winst_verlies_pct = (winst_verlies / pos['totaal_belegd']) * 100
@@ -280,4 +287,4 @@ with tab3:
         st.session_state['watchlist'] = []
         save_user_data()
         st.rerun()
-        
+                
