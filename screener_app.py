@@ -4,6 +4,7 @@ import streamlit as st
 import requests
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor
 
 st.set_page_config(page_title="Global Value Screener & Portfolio Simulator", layout="wide")
 
@@ -18,7 +19,6 @@ def load_user_data():
                 return json.load(f)
         except Exception:
             pass
-    # Standaard beginwaarden als er nog niks is opgeslagen
     return {
         "watchlist": [],
         "portfolio_cash": 20000.0,
@@ -35,7 +35,6 @@ def save_user_data():
     with open(DATA_FILE, "w") as f:
         json.dump(data, f, indent=4)
 
-# Initialiseer de sessie op basis van de opgeslagen JSON-data
 if 'initialized' not in st.session_state:
     saved_data = load_user_data()
     st.session_state['watchlist'] = saved_data.get("watchlist", [])
@@ -54,9 +53,15 @@ def get_all_global_tickers():
         us_url = "https://raw.githubusercontent.com/rreichel3/US-Stock-Symbols/main/all/all_tickers.txt"
         us_tickers = requests.get(us_url).text.splitlines()
         
-        eu_bases = ["ASML", "INGA", "ADYEN", "HEIA", "UNA", "RAND", "AALB", "UCB", "KBC", "SOLB", "SAP", "BMW", "MC", "OR", "BP", "GSK"]
+        # Uitgebreidere lijst van Europese topaandelen
+        eu_bases = [
+            "AALB", "ABI", "ACKB", "ADYEN", "AGN", "AIR", "ALV", "AMG", "ASML", "ASRNL", "BESI", "BNP", "BP", "BSGR",
+            "COLR", "CPR", "DSM", "DTE", "ENEL", "EXOR", "FLOW", "GSK", "HEIA", "INGA", "KBC", "LIGHT", "MC", "NN",
+            "NOVN", "NWG", "OR", "PHI", "PRX", "RAND", "REN", "ROG", "SAN", "SAP", "SBMO", "SHELL", "SIE", "SOLB",
+            "TTE", "UCB", "UNA", "VNA", "VPK", "WKL"
+        ]
         eu_tickers = [f"{base}.AS" for base in eu_bases]
-        asia_tickers = ["TSM", "SONY", "TM", "BABA"]
+        asia_tickers = ["BABA", "BIDU", "9984.T", "7267.T", "6758.T", "SONY", "TM", "TSM"]
 
         return {
             "🇺🇸 Noord-Amerika": sorted(list(set(us_tickers))),
@@ -64,7 +69,7 @@ def get_all_global_tickers():
             "🌏 Azië": sorted(list(set(asia_tickers)))
         }
     except Exception:
-        return {"🇺🇸 Noord-Amerika": ["AAPL", "MSFT", "GOOGL"], "🇪🇺 Europa": ["ASML.AS", "INGA.AS"]}
+        return {"🇺🇸 Noord-Amerika": ["AAPL", "AMZN", "BAC", "CSCO"], "🇪🇺 Europa": ["AALB.AS", "ASML.AS", "BESI.AS"]}
 
 global_database = get_all_global_tickers()
 
@@ -81,16 +86,9 @@ def scan_ticker_data(ticker_symbol):
         
         bs = stock.balance_sheet
         fin = stock.financials
-        cf = stock.cashflow
         if bs.empty or fin.empty: return None
             
-        latest_bs = bs.iloc[:, 0]
-        latest_fin = fin.iloc[:, 0]
-        
-        market_cap = info.get("marketCap")
-        enterprise_value = info.get("enterpriseValue")
         ev_ebitda = info.get("enterpriseToEbitda")
-        
         roe = info.get("returnOnEquity") or 0
         
         roe_5y_avg = 0
@@ -130,26 +128,63 @@ def scan_ticker_data(ticker_symbol):
 # ==========================================
 with tab1:
     st.header("🔍 Slimme Markt Scanner")
-    selected_continent = st.selectbox("Kies een continent:", list(global_database.keys()))
-    max_to_scan = st.number_input("Hoeveel aandelen wil je scannen?", min_value=5, max_value=50, value=10)
+    
+    col_cont, col_alpha = st.columns(2)
+    
+    with col_cont:
+        selected_continent = st.selectbox("1. Kies een continent:", list(global_database.keys()))
+    
+    # Definieer de alphabetische reeksen
+    letter_ranges = {
+        "Alle Aandelen (Alles)": [],
+        "A t/m C": ["A", "B", "C"],
+        "D t/m F": ["D", "E", "F"],
+        "G t/m I": ["G", "H", "I"],
+        "J t/m L": ["J", "K", "L"],
+        "M t/m O": ["M", "N", "O"],
+        "P t/m R": ["P", "Q", "R"],
+        "S t/m U": ["S", "T", "U"],
+        "V t/m Z": ["V", "W", "X", "Y", "Z"]
+    }
+    
+    with col_alpha:
+        selected_range = st.selectbox("2. Kies een Alphabethische Groep:", list(letter_ranges.keys()))
+        
+    # Filter de tickers op basis van de geselecteerde lettergroep
+    all_tickers_in_cont = global_database[selected_continent]
+    if selected_range != "Alle Aandelen (Alles)":
+        target_letters = tuple(letter_ranges[selected_range])
+        filtered_tickers = [t for t in all_tickers_in_cont if t.startswith(target_letters)]
+    else:
+        filtered_tickers = all_tickers_in_cont
+
+    st.info(f"📍 Er zijn **{len(filtered_tickers)}** aandelen gevonden in de categorie **'{selected_range}'** voor {selected_continent}.")
+    
     only_show_best = st.checkbox("🎯 Toon ALLEEN de '🔥 TOP KOOPKANDIDATEN'", value=False)
     
-    if st.button("🚀 Start Mega Scan"):
-        results = []
-        progress_bar = st.progress(0)
-        tickers = global_database[selected_continent][:max_to_scan]
-        
-        for i, t in enumerate(tickers):
-            progress_bar.progress((i + 1) / len(tickers))
-            data = scan_ticker_data(t)
-            if data:
-                if only_show_best and data['raw_advies'] != "🔥 TOP KOOPKANDIDAAT": continue
-                results.append(data)
-                
-        if results:
-            df = pd.DataFrame(results)
-            st.session_state['last_scan_results'] = df
-            st.dataframe(df.drop(columns=['raw_upside', 'raw_advies', 'Huidige Koers Raw']), use_container_width=True)
+    if st.button("🚀 Scan Alle Aandelen in deze Categorie"):
+        if len(filtered_tickers) == 0:
+            st.warning("Geen aandelen gevonden in deze lettergroep.")
+        else:
+            results = []
+            progress_bar = st.progress(0)
+            
+            # Scannen via snelle parallelle verwerking
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                futures = [executor.submit(scan_ticker_data, t) for t in filtered_tickers]
+                for i, future in enumerate(futures):
+                    data = future.result()
+                    progress_bar.progress((i + 1) / len(filtered_tickers))
+                    if data:
+                        if only_show_best and data['raw_advies'] != "🔥 TOP KOOPKANDIDAAT": continue
+                        results.append(data)
+                    
+            if results:
+                df = pd.DataFrame(results)
+                st.session_state['last_scan_results'] = df
+                st.dataframe(df.drop(columns=['raw_upside', 'raw_advies', 'Huidige Koers Raw']), use_container_width=True)
+            else:
+                st.warning("Geen resultaten gevonden voor deze criteria.")
 
     st.markdown("---")
     st.subheader("🛒 Virtueel Beleggen met je € 20.000 Budget")
@@ -178,7 +213,7 @@ with tab1:
                         'gem_aankoopkoers': price,
                         'totaal_belegd': buy_amount
                     }
-                save_user_data() # <-- PERMANENT OPSLAAN OP SCHIJF
+                save_user_data()
                 st.success(f"Gefeliciteerd! Je hebt virtueel **{shares_bought:.2f} aandelen {selected_buy_ticker}** gekocht en opgeslagen!")
 
 # ==========================================
@@ -193,7 +228,7 @@ with tab2:
     if st.button("➕ Voeg toe aan Watchlist"):
         if ticker_to_wl not in st.session_state['watchlist']:
             st.session_state['watchlist'].append(ticker_to_wl)
-            save_user_data() # <-- PERMANENT OPSLAAN OP SCHIJF
+            save_user_data()
             st.success(f"{ticker_to_wl} opgeslagen in je watchlist!")
             
     st.write("Mijn gevolgde aandelen:", st.session_state['watchlist'])
@@ -243,6 +278,6 @@ with tab3:
         st.session_state['portfolio_cash'] = 20000.0
         st.session_state['portfolio_shares'] = {}
         st.session_state['watchlist'] = []
-        save_user_data() # <-- METEEN DATABASE WISSEN EN OPSLAAN
+        save_user_data()
         st.rerun()
-            
+        
