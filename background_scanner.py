@@ -1,4 +1,20 @@
-import os
+import pandas as pd
+import requests
+import io
+
+def get_huge_ticker_list():
+    # Download bijvoorbeeld een openbare lijst van duizenden Amerikaanse tickers
+    url = "https://raw.githubusercontent.com/rreichel3/US-Stock-Symbols/main/all/all_tickers.txt"
+    try:
+        response = requests.get(url)
+        tickers = response.text.splitlines()
+        # Beperk het eventueel tot de eerste 500 of 1000 om binnen je GitHub Actions tijdslimiet te blijven
+        return [t.strip() for t in tickers if t.strip() and len(t.strip()) <= 5][:500]
+    except:
+        # Fallback lijst als het misgaat
+        return ["ASML.AS", "AAPL", "MSFT"]
+
+TARGET_TICKERS = get_huge_ticker_list()import os
 import time
 import yfinance as yf
 from supabase import create_client
