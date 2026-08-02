@@ -3,6 +3,7 @@ import time
 import io
 import requests
 import pandas as pd
+import yfinance
 from supabase import create_client
 
 # Supabase Verbinding
@@ -14,68 +15,82 @@ if not SUPABASE_KEY:
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# Functie om automatisch een brede lijst met honderden aandelen op te halen
-def get_huge_ticker_list():
-    url = "https://raw.githubusercontent.com/rreichel3/US-Stock-Symbols/main/all/all_tickers.txt"
-    try:
-        response = requests.get(url)
-        tickers = response.text.splitlines()
-        # Haalt tot 300 tickers op om binnen de tijdslimiet van GitHub Actions te blijven
-        us_tickers = [t.strip() for t in tickers if t.strip() and len(t.strip()) <= 5][:300]
-    except:
-        us_tickers = ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA"]
-
-    # Voeg handmatig ook belangrijke Europese en wereldwijde aandelen toe
-    eu_tickers = [
-        "ASML.AS", "SHELL.AS", "INGA.AS", "ADYEN.AS", "BESI.AS",
-        "ABI.BR", "KBC.BR", "UCB.BR", "SOLB.BR",
-        "MC.PA", "OR.PA", "TTE.PA", "SAN.PA", "AIR.PA",
-        "SAP", "SIE.DE", "ALV.DE", "BMW.DE", "MBG.DE"
+def get_unlimited_market_tickers():
+    # Haalt een massieve lijst op van duizenden wereldwijde/Amerikaanse en Europese tickers
+    urls = [
+        "https://raw.githubusercontent.com/rreichel3/US-Stock-Symbols/main/all/all_tickers.txt",
+        "https://raw.githubusercontent.com/sven-seidel/all-stock-symbols/main/data/countries/Netherlands.txt",
+        "https://raw.githubusercontent.com/sven-seidel/all-stock-symbols/main/data/countries/Germany.txt",
+        "https://raw.githubusercontent.com/sven-seidel/all-stock-symbols/main/data/countries/France.txt"
     ]
     
-    return eu_tickers + us_tickers
+    all_tickers = set()
+    for url in urls:
+        try:
+            response = requests.get(url)
+            if response.status_code == 200:
+                lines = response.text.splitlines()
+                for t in lines:
+                    t_clean = t.strip()
+                    if t_clean and len(t_clean) <= 6:
+                        all_tickers.add(t_clean)
+        except:
+            continue
 
-TARGET_TICKERS = get_huge_ticker_list()
+    if not all_tickers:
+        return ["AAPL", "MSFT", "GOOGL", "ASML.AS", "SAP", "TSM"]
+
+    # Selecteer een willekeurige steekproef van 500 aandelen per dag voor een brede marktscan
+    ticker_list = list(all_tickers)
+    import random
+    random.shuffle(ticker_list)
+    return ticker_list[:500]
+
+TARGET_TICKERS = get_unlimited_market_tickers()
 
 def scan_and_save_single_stock(ticker_symbol):
     try:
-        print(f"Scannen van {ticker_symbol}...")
-        stock = yfinance.Ticker(ticker_symbol)  # Let op: yfinance wordt hieronder geïmporteerd
+        stock = yfinance.Ticker(ticker_symbol)
         info = stock.info
 
         current = info.get("currentPrice") or info.get("regularMarketPrice")
         if not current:
-            print(f"⚠️ Geen koers gevonden voor {ticker_symbol}")
             return
 
+        # 1. Upside berekenen
         target = info.get("targetMeanPrice")
-        upside = ((target - current) / current) * 100 if target else 0
+        upside = ((target - current) / current) * 100 if target else 0.0
 
-        bs = stock.balance_sheet
-        fin = stock.financials
-
-        if bs.empty or fin.empty:
-            return
-
-        # Eenvoudige kwaliteitscontrole en waardering berekenen
-        ev_ebitda = info.get("enterpriseToEbitda")
-        
-        # Haal ROE op indien beschikbaar
+        # 2. ROE (Return on Equity) ophalen
         roe = info.get("returnOnEquity")
         if roe is None:
-            roe = 0.15 # Standaard fallback voor stabiliteit
+            roe = 0.10 # Conservatieve fallback
+
+        # 3. ROE 5 jaar gemiddelde ophalen of schatten
+        # Soms heeft yfinance 'fiveYearAvgReturn', anders gebruiken we de huidige ROE als veilige basis
+        roe_5y_avg = info.get("fiveYearAvgReturn")
+        if roe_5y_avg is None:
+            roe_5y_avg = roe 
+        else:
+            # Soms geeft yfinance dit als percentage of decimaal, even normaliseren
+            if roe_5y_avg > 1.0:
+                roe_5y_avg = roe_5y_avg / 100.0
+
+        ev_ebitda = info.get("enterpriseToEbitda")
 
         # Advies logica
-        if roe >= 0.15 and (ev_ebitda is not None and ev_ebitda < 25) and upside > 0:
+        if roe >= 0.15 and (ev_ebitda is not None and ev_ebitda < 20) and upside > 5:
             advies = "🔥 TOP KOOPKANDIDAAT"
-        elif roe >= 0.15:
+        elif roe >= 0.12:
             advies = "💎 Kwaliteit (Te Duur)"
         else:
             advies = "❌ Negeren"
 
-        # Bepaal continent
-        if any(ext in ticker_symbol for ext in [".AS", ".BR", ".PA", ".DE"]):
+        # Bepaal continent automatisch
+        if any(ext in ticker_symbol for ext in [".AS", ".BR", ".PA", ".DE", ".L", ".SW", ".XPAR", ".XAMS"]):
             continent = "eu Europa"
+        elif ticker_symbol in ["TSM", "BABA", "SONY", "TM", "TCEHY", "JD", "BIDU"]:
+            continent = "asia Azië"
         else:
             continent = "us Noord-Amerika"
 
@@ -87,23 +102,24 @@ def scan_and_save_single_stock(ticker_symbol):
             "upside": float(upside),
             "ev_ebitda": float(ev_ebitda) if ev_ebitda else None,
             "roe": float(roe),
-            "roe_5y_avg": float(roe),
+            "roe_5y_avg": float(roe_5y_avg),
             "continent": continent
         }
 
         # Opslaan in Supabase
         supabase.table("scanned_stocks").upsert(data).execute()
-        print(f"✅ Opgeslagen: {ticker_symbol} ({advies})")
+        
+        if "TOP KOOPKANDIDAAT" in advies:
+            print(f"🎯 PAREL: {ticker_symbol} | Koers: {current} | Upside: {upside:.1f}% | ROE: {roe*100:.1f}%")
 
     except Exception as e:
-        print(f"❌ Fout bij {ticker_symbol}: {e}")
+        pass
 
 if __name__ == "__main__":
-    import yfinance # Zorg dat yfinance hier geladen is
-    print(f"🚀 Starten van achtergrondscan voor {len(TARGET_TICKERS)} aandelen...")
+    print(f"🚀 Starten van wereldwijde scan met Upside & ROE (5v) voor {len(TARGET_TICKERS)} aandelen...")
     
-    for ticker in TARGET_TICKERS:
+    for idx, ticker in enumerate(TARGET_TICKERS):
         scan_and_save_single_stock(ticker)
-        time.sleep(0.5) # Korte pauze tegen rate limits
+        time.sleep(0.2)
         
-    print("🏁 Scan succesvol afgerond!")
+    print("🏁 Wereldwijde scan succesvol afgerond!")
