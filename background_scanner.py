@@ -3,10 +3,10 @@ import time
 import yfinance as yf
 from supabase import create_client
 
-# Supabase Verbinding via Omgevingsvariabelen
-SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
+# Supabase Verbinding
+SUPABASE_URL = "https://pokfjzgetwaxclfwfhpv.supabase.co"
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 if not SUPABASE_URL or not SUPABASE_KEY:
     raise ValueError("Supabase credentials niet gevonden in omgevingsvariabelen!")
 
