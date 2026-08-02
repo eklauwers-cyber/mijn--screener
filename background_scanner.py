@@ -1,4 +1,6 @@
-import pandas as pd
+for ticker in TARGET_TICKERS:
+    scan_and_save_single_stock(ticker)
+    time.sleep(1)  # 1 seconde pauze per aandeel voorkomt een blokkadeimport pandas as pd
 import requests
 import io
 
