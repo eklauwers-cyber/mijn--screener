@@ -1,0 +1,28 @@
+name: Daily Stock Scan
+
+on:
+  schedule:
+    - cron: '0 2 * * *' # Draait automatisch elke nacht om 02:00 UTC
+  workflow_dispatch: # Zorgt dat je de scan ook handmatig kunt starten via de GitHub knop!
+
+jobs:
+  run-scanner:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Code ophalen uit repository
+        uses: actions/checkout@v3
+
+      - name: Python instellen
+        uses: actions/python-version@v4
+        with:
+          python-version: '3.10'
+
+      - name: Benodigde bibliotheken installeren
+        run: |
+          pip install yfinance pandas requests supabase
+
+      - name: Achtergrondscanner uitvoeren
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python background_scanner.py
